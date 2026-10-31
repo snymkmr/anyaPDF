@@ -1,0 +1,16 @@
+.vscode/**
+.vscode-test/**
+src/**
+media/**/*.ts
+node_modules/**
+.gitignore
+.git/**
+*.vsix
+anypdf-codex-instructions.md
+anypdf-icon.png
+**/*.pdf
+webpack.config.js
+tsconfig.json
+**/*.map
+npm-debug.log
+files/

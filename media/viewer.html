@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src {{cspSource}} data:; style-src {{cspSource}} 'unsafe-inline'; script-src {{cspSource}} 'nonce-{{nonce}}'; connect-src {{cspSource}}; worker-src {{cspSource}} blob:;">
+  <link rel="stylesheet" href="{{cssUri}}">
+  <title>AnyPDF Viewer</title>
+</head>
+<body data-worker-src="{{workerUri}}">
+  <header class="toolbar" aria-label="PDF tools">
+    <div class="group page-controls">
+      <button id="prev-page" title="Previous page" aria-label="Previous page">‹</button>
+      <input id="page-number" type="number" min="1" value="1" aria-label="Current page">
+      <span id="page-total">/ 1</span>
+      <button id="next-page" title="Next page" aria-label="Next page">›</button>
+    </div>
+    <div class="group zoom-controls">
+      <button id="zoom-out" title="Zoom out" aria-label="Zoom out">−</button>
+      <button id="zoom-reset" title="Reset zoom" aria-label="Reset zoom">100%</button>
+      <button id="zoom-in" title="Zoom in" aria-label="Zoom in">+</button>
+      <button id="fit-width" title="Fit to width" aria-label="Fit to width" aria-pressed="false">Fit width</button>
+    </div>
+    <div class="group search-controls">
+      <input id="search-query" type="search" placeholder="Find in document" aria-label="Find in document">
+      <span id="match-count" aria-live="polite"></span>
+      <button id="prev-match" title="Previous match" aria-label="Previous match">↑</button>
+      <button id="next-match" title="Next match" aria-label="Next match">↓</button>
+    </div>
+    <button id="toggle-outline" class="outline-toggle" title="Toggle document outline" aria-label="Toggle document outline" hidden>☰</button>
+  </header>
+  <div id="error-message" class="error-message" role="alert" hidden></div>
+  <div class="workspace">
+    <aside id="outline-pane" class="outline-pane" hidden>
+      <div class="outline-heading">Document outline</div>
+      <nav id="outline-list" aria-label="Document outline"></nav>
+    </aside>
+    <main id="reader" class="reader" tabindex="0" aria-label="PDF pages">
+      <div id="pages" class="pages"></div>
+    </main>
+  </div>
+  <script nonce="{{nonce}}" src="{{viewerUri}}"></script>
+</body>
+</html>
