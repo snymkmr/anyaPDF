@@ -1,4 +1,4 @@
-# AnyPDF
+# AnyaPDF
 
 View PDF documents in Visual Studio Code.
 
@@ -20,6 +20,6 @@ View PDF documents in Visual Studio Code.
 | `Ctrl+F` | Find in document |
 | `PageUp` / `PageDown` | Previous / next page |
 
-AnyPDF is a read-only viewer. It does not edit, annotate, fill, sign, merge, split, or print PDF files.
+AnyaPDF is a read-only viewer. It does not edit, annotate, fill, sign, merge, split, or print PDF files.
 
 License: MIT

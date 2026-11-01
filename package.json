@@ -1,10 +1,10 @@
 {
-  "name": "anypdf",
-  "displayName": "AnyPDF",
-  "publisher": "SanyamKumar",
-  "version": "0.1.0",
-  "description": "View PDF documents in Visual Studio Code.",
-  "icon": "images/anypdf-icon.png",
+  "name": "anyapdf",
+  "displayName": "AnyaPDF",
+  "publisher": "Sanyam",
+  "version": "0.1.1",
+  "description": "Read PDF files in VS Code.",
+  "icon": "images/anyapdf-icon.png",
   "engines": {
     "vscode": "^1.85.0"
   },
@@ -31,31 +31,31 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/SanyamKumar/anyPDF.git"
+    "url": "https://github.com/snymkmr/anyaPDF.git"
   },
   "homepage": "https://sanyam.dev",
   "license": "MIT",
   "bugs": {
-    "url": "https://github.com/SanyamKumar/anyPDF/issues"
+    "url": "https://github.com/snymkmr/anyaPDF/issues"
   },
   "contributes": {
     "customEditors": [
       {
         "viewType": "anypdf.pdfViewer",
-        "displayName": "AnyPDF Viewer",
+        "displayName": "AnyaPDF Viewer",
         "selector": [{ "filenamePattern": "*.pdf" }],
         "priority": "default"
       }
     ],
     "commands": [
-      { "command": "anypdf.zoomIn", "title": "AnyPDF: Zoom In" },
-      { "command": "anypdf.zoomOut", "title": "AnyPDF: Zoom Out" },
-      { "command": "anypdf.zoomReset", "title": "AnyPDF: Reset Zoom" },
-      { "command": "anypdf.fitWidth", "title": "AnyPDF: Fit to Width" },
-      { "command": "anypdf.goToPage", "title": "AnyPDF: Go to Page" },
-      { "command": "anypdf.find", "title": "AnyPDF: Find" },
-      { "command": "anypdf.nextPage", "title": "AnyPDF: Next Page" },
-      { "command": "anypdf.prevPage", "title": "AnyPDF: Previous Page" }
+      { "command": "anypdf.zoomIn", "title": "AnyaPDF: Zoom In" },
+      { "command": "anypdf.zoomOut", "title": "AnyaPDF: Zoom Out" },
+      { "command": "anypdf.zoomReset", "title": "AnyaPDF: Reset Zoom" },
+      { "command": "anypdf.fitWidth", "title": "AnyaPDF: Fit to Width" },
+      { "command": "anypdf.goToPage", "title": "AnyaPDF: Go to Page" },
+      { "command": "anypdf.find", "title": "AnyaPDF: Find" },
+      { "command": "anypdf.nextPage", "title": "AnyaPDF: Next Page" },
+      { "command": "anypdf.prevPage", "title": "AnyaPDF: Previous Page" }
     ],
     "keybindings": [
       { "command": "anypdf.zoomIn", "key": "ctrl+=", "when": "activeCustomEditorId == 'anypdf.pdfViewer'" },
@@ -66,7 +66,7 @@
       { "command": "anypdf.prevPage", "key": "pageup", "when": "activeCustomEditorId == 'anypdf.pdfViewer'" }
     ],
     "configuration": {
-      "title": "AnyPDF",
+      "title": "AnyaPDF",
       "properties": {
         "anypdf.defaultZoom": {
           "type": "number",

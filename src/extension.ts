@@ -22,7 +22,7 @@ class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider<PdfDocume
 	private readonly disposables: vscode.Disposable[] = [];
 
 	constructor(private readonly context: vscode.ExtensionContext) {
-		this.status.name = "AnyPDF Page and Zoom";
+		this.status.name = "AnyaPDF Page and Zoom";
 		this.disposables.push(this.status);
 		this.disposables.push(vscode.commands.registerCommand("anypdf.zoomIn", () => this.post({ type: "action", action: "zoomIn" })));
 		this.disposables.push(vscode.commands.registerCommand("anypdf.zoomOut", () => this.post({ type: "action", action: "zoomOut" })));
@@ -48,7 +48,7 @@ class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider<PdfDocume
 			return new PdfDocument(uri, bytes);
 		} catch (error) {
 			const detail = error instanceof Error ? error.message : String(error);
-			void vscode.window.showErrorMessage(`AnyPDF could not read this file: ${detail}`);
+			void vscode.window.showErrorMessage(`AnyaPDF could not read this file: ${detail}`);
 			throw error;
 		}
 	}

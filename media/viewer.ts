@@ -242,7 +242,7 @@ async function renderPage(pageNumber: number): Promise<void> {
 		updateStatus();
 	} catch (error) {
 		if (!(error instanceof Error && error.name === "RenderingCancelledException")) {
-			console.error(`[AnyPDF] Failed to render page ${pageNumber}`, error);
+			console.error(`[AnyaPDF] Failed to render page ${pageNumber}`, error);
 			showError("Couldn't open this PDF — the file may be corrupt or password-protected.", `Page ${pageNumber}: ${describeError(error)}`);
 		}
 	} finally {
@@ -421,7 +421,7 @@ async function openPdf(data: Uint8Array, defaultZoom: number, fitToWidthOnOpen: 
 		void renderPage(1).finally(() => { void buildOutline(); });
 		updateStatus();
 	} catch (error) {
-		console.error(`[AnyPDF] Failed while ${phase}`, error);
+		console.error(`[AnyaPDF] Failed while ${phase}`, error);
 		showError("Couldn't open this PDF — the file may be corrupt or password-protected.", `${phase}: ${describeError(error)}`);
 	}
 }
@@ -430,7 +430,7 @@ window.addEventListener("message", (event: MessageEvent) => {
 	const message = event.data as { type?: string; data?: ArrayBuffer; action?: string; page?: number; defaultZoom?: number; fitToWidthOnOpen?: boolean };
 	if (message.type === "loadPdf") {
 		if (!(message.data instanceof ArrayBuffer)) {
-			showError("AnyPDF couldn't receive this PDF.", "The extension sent data in an unsupported format.");
+			showError("AnyaPDF couldn't receive this PDF.", "The extension sent data in an unsupported format.");
 			return;
 		}
 		void openPdf(new Uint8Array(message.data), message.defaultZoom ?? 100, message.fitToWidthOnOpen ?? false);
