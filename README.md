@@ -22,4 +22,8 @@ View PDF documents in Visual Studio Code.
 
 AnyaPDF is a read-only viewer. It does not edit, annotate, fill, sign, merge, split, or print PDF files.
 
+## Privacy
+
+See the [Privacy Policy](https://sanyam.dev/privacy) for privacy information about my projects.
+
 License: MIT

@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.1
+
+- Add a Privacy section linking to the project privacy policy.
+
 ## 0.2.0
 
 - Rename commands, settings, and the custom editor to use the Anya namespace. Update saved command references, setting keys, and editor associations to the new IDs.
