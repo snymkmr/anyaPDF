@@ -10,7 +10,7 @@
   },
   "categories": ["Other"],
   "keywords": ["pdf", "viewer"],
-  "activationEvents": ["onCustomEditor:anypdf.pdfViewer"],
+  "activationEvents": ["onCustomEditor:anyapdf.pdfViewer"],
   "main": "./dist/extension.js",
   "scripts": {
     "compile": "webpack",
@@ -41,41 +41,41 @@
   "contributes": {
     "customEditors": [
       {
-        "viewType": "anypdf.pdfViewer",
+        "viewType": "anyapdf.pdfViewer",
         "displayName": "AnyaPDF Viewer",
         "selector": [{ "filenamePattern": "*.pdf" }],
         "priority": "default"
       }
     ],
     "commands": [
-      { "command": "anypdf.zoomIn", "title": "AnyaPDF: Zoom In" },
-      { "command": "anypdf.zoomOut", "title": "AnyaPDF: Zoom Out" },
-      { "command": "anypdf.zoomReset", "title": "AnyaPDF: Reset Zoom" },
-      { "command": "anypdf.fitWidth", "title": "AnyaPDF: Fit to Width" },
-      { "command": "anypdf.goToPage", "title": "AnyaPDF: Go to Page" },
-      { "command": "anypdf.find", "title": "AnyaPDF: Find" },
-      { "command": "anypdf.nextPage", "title": "AnyaPDF: Next Page" },
-      { "command": "anypdf.prevPage", "title": "AnyaPDF: Previous Page" }
+      { "command": "anyapdf.zoomIn", "title": "AnyaPDF: Zoom In" },
+      { "command": "anyapdf.zoomOut", "title": "AnyaPDF: Zoom Out" },
+      { "command": "anyapdf.zoomReset", "title": "AnyaPDF: Reset Zoom" },
+      { "command": "anyapdf.fitWidth", "title": "AnyaPDF: Fit to Width" },
+      { "command": "anyapdf.goToPage", "title": "AnyaPDF: Go to Page" },
+      { "command": "anyapdf.find", "title": "AnyaPDF: Find" },
+      { "command": "anyapdf.nextPage", "title": "AnyaPDF: Next Page" },
+      { "command": "anyapdf.prevPage", "title": "AnyaPDF: Previous Page" }
     ],
     "keybindings": [
-      { "command": "anypdf.zoomIn", "key": "ctrl+=", "when": "activeCustomEditorId == 'anypdf.pdfViewer'" },
-      { "command": "anypdf.zoomOut", "key": "ctrl+-", "when": "activeCustomEditorId == 'anypdf.pdfViewer'" },
-      { "command": "anypdf.zoomReset", "key": "ctrl+0", "when": "activeCustomEditorId == 'anypdf.pdfViewer'" },
-      { "command": "anypdf.find", "key": "ctrl+f", "when": "activeCustomEditorId == 'anypdf.pdfViewer'" },
-      { "command": "anypdf.nextPage", "key": "pagedown", "when": "activeCustomEditorId == 'anypdf.pdfViewer'" },
-      { "command": "anypdf.prevPage", "key": "pageup", "when": "activeCustomEditorId == 'anypdf.pdfViewer'" }
+      { "command": "anyapdf.zoomIn", "key": "ctrl+=", "when": "activeCustomEditorId == 'anyapdf.pdfViewer'" },
+      { "command": "anyapdf.zoomOut", "key": "ctrl+-", "when": "activeCustomEditorId == 'anyapdf.pdfViewer'" },
+      { "command": "anyapdf.zoomReset", "key": "ctrl+0", "when": "activeCustomEditorId == 'anyapdf.pdfViewer'" },
+      { "command": "anyapdf.find", "key": "ctrl+f", "when": "activeCustomEditorId == 'anyapdf.pdfViewer'" },
+      { "command": "anyapdf.nextPage", "key": "pagedown", "when": "activeCustomEditorId == 'anyapdf.pdfViewer'" },
+      { "command": "anyapdf.prevPage", "key": "pageup", "when": "activeCustomEditorId == 'anyapdf.pdfViewer'" }
     ],
     "configuration": {
       "title": "AnyaPDF",
       "properties": {
-        "anypdf.defaultZoom": {
+        "anyapdf.defaultZoom": {
           "type": "number",
           "default": 100,
           "minimum": 25,
           "maximum": 400,
           "description": "Default PDF zoom percentage."
         },
-        "anypdf.fitToWidthOnOpen": {
+        "anyapdf.fitToWidthOnOpen": {
           "type": "boolean",
           "default": true,
           "description": "Fit PDF pages to the available editor width when opened."

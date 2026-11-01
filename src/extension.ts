@@ -1,7 +1,7 @@
 import * as path from "path";
 import * as vscode from "vscode";
 
-const viewType = "anypdf.pdfViewer";
+const viewType = "anyapdf.pdfViewer";
 
 class PdfDocument implements vscode.CustomDocument {
 	private readonly disposeEmitter = new vscode.EventEmitter<void>();
@@ -24,14 +24,14 @@ class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider<PdfDocume
 	constructor(private readonly context: vscode.ExtensionContext) {
 		this.status.name = "AnyaPDF Page and Zoom";
 		this.disposables.push(this.status);
-		this.disposables.push(vscode.commands.registerCommand("anypdf.zoomIn", () => this.post({ type: "action", action: "zoomIn" })));
-		this.disposables.push(vscode.commands.registerCommand("anypdf.zoomOut", () => this.post({ type: "action", action: "zoomOut" })));
-		this.disposables.push(vscode.commands.registerCommand("anypdf.zoomReset", () => this.post({ type: "action", action: "zoomReset" })));
-		this.disposables.push(vscode.commands.registerCommand("anypdf.fitWidth", () => this.post({ type: "action", action: "fitWidth" })));
-		this.disposables.push(vscode.commands.registerCommand("anypdf.find", () => this.post({ type: "action", action: "find" })));
-		this.disposables.push(vscode.commands.registerCommand("anypdf.nextPage", () => this.post({ type: "action", action: "nextPage" })));
-		this.disposables.push(vscode.commands.registerCommand("anypdf.prevPage", () => this.post({ type: "action", action: "prevPage" })));
-		this.disposables.push(vscode.commands.registerCommand("anypdf.goToPage", async () => {
+		this.disposables.push(vscode.commands.registerCommand("anyapdf.zoomIn", () => this.post({ type: "action", action: "zoomIn" })));
+		this.disposables.push(vscode.commands.registerCommand("anyapdf.zoomOut", () => this.post({ type: "action", action: "zoomOut" })));
+		this.disposables.push(vscode.commands.registerCommand("anyapdf.zoomReset", () => this.post({ type: "action", action: "zoomReset" })));
+		this.disposables.push(vscode.commands.registerCommand("anyapdf.fitWidth", () => this.post({ type: "action", action: "fitWidth" })));
+		this.disposables.push(vscode.commands.registerCommand("anyapdf.find", () => this.post({ type: "action", action: "find" })));
+		this.disposables.push(vscode.commands.registerCommand("anyapdf.nextPage", () => this.post({ type: "action", action: "nextPage" })));
+		this.disposables.push(vscode.commands.registerCommand("anyapdf.prevPage", () => this.post({ type: "action", action: "prevPage" })));
+		this.disposables.push(vscode.commands.registerCommand("anyapdf.goToPage", async () => {
 			const value = await vscode.window.showInputBox({ prompt: "Go to PDF page", placeHolder: "Page number" });
 			if (value) {
 				const page = Number.parseInt(value, 10);
@@ -65,7 +65,7 @@ class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider<PdfDocume
 
 		const ready = panel.webview.onDidReceiveMessage((message: { type?: string; page?: number; total?: number; zoom?: number }) => {
 			if (message.type === "ready") {
-				const configuration = vscode.workspace.getConfiguration("anypdf");
+				const configuration = vscode.workspace.getConfiguration("anyapdf");
 				// Webview messaging transfers ArrayBuffer reliably; TypedArrays may arrive as plain objects.
 				const pdfData = new ArrayBuffer(document.bytes.byteLength);
 				new Uint8Array(pdfData).set(document.bytes);
