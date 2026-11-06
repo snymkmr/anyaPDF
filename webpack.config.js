@@ -8,7 +8,7 @@ module.exports = [
     target: "node",
     entry: "./src/extension.ts",
     output: {
-      path: path.resolve(__dirname, "dist"),
+      path: path.resolve(__dirname, "out"),
       filename: "extension.js",
       libraryTarget: "commonjs2",
       devtoolModuleFilenameTemplate: "../[resource-path]"
@@ -24,11 +24,12 @@ module.exports = [
         patterns: [
           {
             from: path.resolve(__dirname, "node_modules/pdfjs-dist/build/pdf.worker.min.mjs"),
-            to: path.resolve(__dirname, "media/pdf.worker.min.mjs"),
+            to: path.resolve(__dirname, "out/media/pdf.worker.min.mjs"),
             transform(content) {
               // Keep the PDF.js 4 worker compatible with the Chromium bundled in VS Code 1.85.
               const promiseCompat = `if (typeof Promise.withResolvers !== "function") { Promise.withResolvers = function () { var resolve, reject; var promise = new Promise(function (res, rej) { resolve = res; reject = rej; }); return { promise: promise, resolve: resolve, reject: reject }; }; }`;
-              return `${promiseCompat}\n${content.toString()}`;
+              const modificationNotice = "// Modified by AnyaPDF: Promise.withResolvers shim prepended. The original PDF.js worker follows unchanged. See THIRD-PARTY-NOTICES.md.";
+              return `${modificationNotice}\n${promiseCompat}\n${content.toString()}`;
             }
           }
         ]
@@ -39,9 +40,9 @@ module.exports = [
     name: "webview",
     mode: "production",
     target: "web",
-    entry: "./media/viewer.ts",
+    entry: "./src/webview/viewer.ts",
     output: {
-      path: path.resolve(__dirname, "media"),
+      path: path.resolve(__dirname, "out/media"),
       filename: "viewer.js",
       clean: false
     },

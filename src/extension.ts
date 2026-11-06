@@ -54,10 +54,12 @@ class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider<PdfDocume
 	}
 
 	async resolveCustomEditor(document: PdfDocument, panel: vscode.WebviewPanel): Promise<void> {
-		const media = vscode.Uri.joinPath(this.context.extensionUri, "media");
 		panel.webview.options = {
 			enableScripts: true,
-			localResourceRoots: [media, this.context.extensionUri]
+			localResourceRoots: [
+				vscode.Uri.joinPath(this.context.extensionUri, "media"),
+				vscode.Uri.joinPath(this.context.extensionUri, "out", "media")
+			]
 		};
 		panel.webview.html = this.getHtml(panel.webview);
 		this.panels.add(panel);
@@ -101,8 +103,8 @@ class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider<PdfDocume
 	private getHtml(webview: vscode.Webview): string {
 		const nonce = getNonce();
 		const htmlPath = vscode.Uri.joinPath(this.context.extensionUri, "media", "viewer.html");
-		const viewerUri = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "viewer.js"));
-		const workerUri = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "pdf.worker.min.mjs"));
+		const viewerUri = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "out", "media", "viewer.js"));
+		const workerUri = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "out", "media", "pdf.worker.min.mjs"));
 		const cssUri = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "media", "viewer.css"));
 		const fs = require("fs") as typeof import("fs");
 		let html = fs.readFileSync(htmlPath.fsPath, "utf8");

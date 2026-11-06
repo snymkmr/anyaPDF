@@ -1,10 +1,15 @@
 {
   "name": "anyapdf",
   "displayName": "AnyaPDF",
-  "publisher": "Sanyam",
-  "version": "0.2.1",
   "description": "Read PDF files in VS Code.",
+  "version": "0.2.2",
+  "publisher": "Sanyam",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/snymkmr/anyaPDF.git"
+  },
   "icon": "images/anyapdf-icon.png",
+  "license": "MIT",
   "engines": {
     "vscode": "^1.85.0"
   },
@@ -15,36 +20,14 @@
     "pdf",
     "viewer"
   ],
-  "activationEvents": [
-    "onCustomEditor:anyapdf.pdfViewer"
-  ],
-  "main": "./dist/extension.js",
-  "scripts": {
-    "compile": "webpack",
-    "watch": "webpack --watch",
-    "vscode:prepublish": "npm run compile"
-  },
-  "dependencies": {
-    "pdfjs-dist": "^4.10.38"
-  },
-  "devDependencies": {
-    "@types/node": "^20.11.0",
-    "@types/vscode": "^1.85.0",
-    "copy-webpack-plugin": "^12.0.2",
-    "ts-loader": "^9.5.1",
-    "typescript": "^5.3.3",
-    "webpack": "^5.89.0",
-    "webpack-cli": "^5.1.4"
-  },
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/snymkmr/anyaPDF.git"
-  },
   "homepage": "https://sanyam.dev",
-  "license": "MIT",
   "bugs": {
     "url": "https://github.com/snymkmr/anyaPDF/issues"
   },
+  "activationEvents": [
+    "onCustomEditor:anyapdf.pdfViewer"
+  ],
+  "main": "./out/extension.js",
   "contributes": {
     "customEditors": [
       {
@@ -141,5 +124,25 @@
         }
       }
     }
+  },
+  "scripts": {
+    "test": "npm run compile && node --test",
+    "compile": "webpack",
+    "package": "node -e \"require('fs').mkdirSync('dist',{recursive:true})\" && vsce package -o dist/",
+    "watch": "webpack --watch",
+    "vscode:prepublish": "npm run compile"
+  },
+  "dependencies": {
+    "pdfjs-dist": "^4.10.38"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "@types/vscode": "^1.85.0",
+    "@vscode/vsce": "^4.1.0",
+    "copy-webpack-plugin": "^12.0.2",
+    "ts-loader": "^9.5.1",
+    "typescript": "^5.3.3",
+    "webpack": "^5.89.0",
+    "webpack-cli": "^5.1.4"
   }
 }

@@ -35,6 +35,7 @@ let currentPage = 1;
 let searchGeneration = 0;
 let currentMatch = -1;
 let matches: SearchMatch[] = [];
+let pendingMatchReveal = false;
 let lastStatus = "";
 const pageElements = new Map<number, HTMLDivElement>();
 const pageSizes = new Map<number, { width: number; height: number }>();
@@ -208,6 +209,9 @@ async function renderPage(pageNumber: number): Promise<void> {
 		const viewport = page.getViewport({ scale });
 		pageElement.style.width = `${Math.round(viewport.width)}px`;
 		pageElement.style.height = `${Math.round(viewport.height)}px`;
+		// PDF.js sizes text-layer spans with calc(var(--scale-factor) * …); without it every span
+		// falls back to the inherited font size and search highlights land in the wrong place.
+		pageElement.style.setProperty("--scale-factor", String(viewport.scale));
 		pageElement.replaceChildren();
 		const canvas = document.createElement("canvas");
 		const outputScale = window.devicePixelRatio || 1;
@@ -239,6 +243,9 @@ async function renderPage(pageNumber: number): Promise<void> {
 		addTextItemIndices(textLayerTask.textDivs, textContent);
 		renderedPages.add(pageNumber);
 		paintHighlights(pageNumber);
+		if (pendingMatchReveal && matches[currentMatch]?.page === pageNumber && revealCurrentMatch()) {
+			pendingMatchReveal = false;
+		}
 		updateStatus();
 	} catch (error) {
 		if (!(error instanceof Error && error.name === "RenderingCancelledException")) {
@@ -278,19 +285,33 @@ function scrollToPage(pageNumber: number): void {
 	}
 }
 
+function revealCurrentMatch(): boolean {
+	const match = matches[currentMatch];
+	if (!match) { return false; }
+	const mark = pageElements.get(match.page)?.querySelector<HTMLElement>(".match-highlight.current");
+	if (!mark) { return false; }
+	mark.scrollIntoView({ behavior: "smooth", block: "center", inline: "nearest" });
+	return true;
+}
+
 function moveMatch(direction: number): void {
 	if (!matches.length) { return; }
 	currentMatch = (currentMatch + direction + matches.length) % matches.length;
 	const match = matches[currentMatch];
 	matchCount.textContent = `${currentMatch + 1} of ${matches.length}`;
+	// Repaint every rendered page so the previous "current" mark is cleared even across pages.
+	for (const pageNumber of renderedPages) { paintHighlights(pageNumber); }
+	if (revealCurrentMatch()) { pendingMatchReveal = false; return; }
+	// Page not rendered yet: scroll to it and reveal the match once renderPage paints it.
+	pendingMatchReveal = true;
 	scrollToPage(match.page);
-	void renderPage(match.page).then(() => paintHighlights(match.page));
 }
 
 async function search(query: string): Promise<void> {
 	const generation = ++searchGeneration;
 	matches = [];
 	currentMatch = -1;
+	pendingMatchReveal = false;
 	matchCount.textContent = "";
 	for (const pageNumber of renderedPages) { paintHighlights(pageNumber); }
 	if (!pdf || !query.trim()) { return; }
