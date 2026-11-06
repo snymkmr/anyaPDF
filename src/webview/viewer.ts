@@ -44,6 +44,7 @@ const renderedPages = new Set<number>();
 const nearbyPages = new Set<number>();
 const renderTasks = new Map<number, pdfjsLib.RenderTask>();
 const renderTokens = new Map<number, object>();
+const pageGap = 18; // Matches the .pages top padding in viewer.css.
 
 async function initializePdfWorker(): Promise<void> {
 	if (!workerSrc) { throw new Error("PDF worker resource is unavailable."); }
@@ -163,6 +164,75 @@ function makeRange(span: HTMLElement, start: number, end: number): Range | undef
 	return undefined;
 }
 
+// Real glyph advance widths per PDF font, keyed by the Unicode text each glyph produces.
+// The text layer draws spans in a generic fallback font stretched to the right total width,
+// so positions *inside* a span drift on long lines; these widths place highlights exactly.
+type GlyphWidths = Map<string, number>;
+type PdfTextItem = { str: string; fontName: string; transform: number[] };
+type FontData = { widths?: Record<number, number>; toUnicode?: { _map?: unknown[] }; vertical?: boolean };
+const fontWidths = new Map<string, GlyphWidths | null>();
+const textItemsByPage = new Map<number, PdfTextItem[]>();
+
+function loadFontWidths(page: pdfjsLib.PDFPageProxy, textContent: TextContent): void {
+	for (const item of textContent.items) {
+		if (!("fontName" in item) || fontWidths.has(item.fontName) || !page.commonObjs.has(item.fontName)) { continue; }
+		const font = page.commonObjs.get(item.fontName) as FontData;
+		const unicodeByCode = font.toUnicode?._map;
+		if (!font.widths || !Array.isArray(unicodeByCode) || font.vertical) { fontWidths.set(item.fontName, null); continue; }
+		const table: GlyphWidths = new Map();
+		unicodeByCode.forEach((unicode, code) => {
+			const width = font.widths?.[code];
+			if (typeof unicode === "string" && typeof width === "number" && !table.has(unicode)) { table.set(unicode, width); }
+		});
+		fontWidths.set(item.fontName, table.size ? table : null);
+	}
+}
+
+function getTextItem(pageNumber: number, itemIndex: number): PdfTextItem | undefined {
+	let items = textItemsByPage.get(pageNumber);
+	if (!items) {
+		const content = textContents.get(pageNumber);
+		if (!content) { return undefined; }
+		items = content.items.filter((item): item is typeof item & PdfTextItem => "str" in item);
+		textItemsByPage.set(pageNumber, items);
+	}
+	return items[itemIndex];
+}
+
+/** Start and end of [start, end) as fractions of the item's width, or undefined if any glyph is unknown. */
+function glyphFractions(item: PdfTextItem, start: number, end: number): [number, number] | undefined {
+	const table = fontWidths.get(item.fontName);
+	if (!table || Math.abs(Math.atan2(item.transform[1], item.transform[0])) > 0.001) { return undefined; }
+	const measure = (text: string): number | undefined => {
+		let total = 0;
+		for (const character of text) {
+			const width = table.get(character);
+			if (width === undefined) { return undefined; }
+			total += width;
+		}
+		return total;
+	};
+	const before = measure(item.str.slice(0, start));
+	const inside = measure(item.str.slice(start, end));
+	const after = measure(item.str.slice(end));
+	if (before === undefined || inside === undefined || after === undefined) { return undefined; }
+	const total = before + inside + after;
+	if (total <= 0) { return undefined; }
+	return [before / total, (before + inside) / total];
+}
+
+function matchRects(pageNumber: number, match: SearchMatch, span: HTMLElement): DOMRect[] {
+	const item = getTextItem(pageNumber, match.itemIndex);
+	const fractions = item ? glyphFractions(item, match.start, match.end) : undefined;
+	if (fractions) {
+		const spanRect = span.getBoundingClientRect();
+		return [new DOMRect(spanRect.left + spanRect.width * fractions[0], spanRect.top, spanRect.width * (fractions[1] - fractions[0]), spanRect.height)];
+	}
+	// Fallback (rotated text, unknown glyphs): measure with the text layer's own font.
+	const range = makeRange(span, match.start, match.end);
+	return range ? Array.from(range.getClientRects()) : [];
+}
+
 function paintHighlights(pageNumber: number): void {
 	const page = pageElements.get(pageNumber);
 	if (!page) { return; }
@@ -176,9 +246,7 @@ function paintHighlights(pageNumber: number): void {
 		if (match.page !== pageNumber) { continue; }
 		const span = textLayer.querySelector<HTMLElement>(`span[data-text-index="${match.itemIndex}"]`);
 		if (!span) { continue; }
-		const range = makeRange(span, match.start, match.end);
-		if (!range) { continue; }
-		for (const rect of Array.from(range.getClientRects())) {
+		for (const rect of matchRects(pageNumber, match, span)) {
 			const mark = document.createElement("div");
 			mark.className = `match-highlight${matchIndex === currentMatch ? " current" : ""}`;
 			mark.style.left = `${rect.left - pageRect.left}px`;
@@ -237,6 +305,7 @@ async function renderPage(pageNumber: number): Promise<void> {
 		const textContent = cachedTextContent ?? await page.getTextContent();
 		if (renderTokens.get(pageNumber) !== token) { return; }
 		textContents.set(pageNumber, textContent);
+		loadFontWidths(page, textContent);
 		const textLayerTask = new pdfjsLib.TextLayer({ textContentSource: textContent, container: textLayer, viewport });
 		await textLayerTask.render();
 		if (renderTokens.get(pageNumber) !== token) { return; }
@@ -279,7 +348,8 @@ function scrollToPage(pageNumber: number): void {
 	if (element) {
 		currentPage = clamped;
 		pageInput.value = String(clamped);
-		element.scrollIntoView({ behavior: "smooth", block: "start" });
+		const readerTop = reader.getBoundingClientRect().top;
+		reader.scrollTo({ top: reader.scrollTop + element.getBoundingClientRect().top - readerTop - pageGap, behavior: "smooth" });
 		void renderPage(clamped);
 		sendStatus();
 	}
@@ -290,7 +360,15 @@ function revealCurrentMatch(): boolean {
 	if (!match) { return false; }
 	const mark = pageElements.get(match.page)?.querySelector<HTMLElement>(".match-highlight.current");
 	if (!mark) { return false; }
-	mark.scrollIntoView({ behavior: "smooth", block: "center", inline: "nearest" });
+	// Scroll only the reader: scrollIntoView would also scroll the document and push the toolbar off-screen.
+	const markRect = mark.getBoundingClientRect();
+	const readerRect = reader.getBoundingClientRect();
+	const top = reader.scrollTop + markRect.top - readerRect.top - (reader.clientHeight - markRect.height) / 2;
+	let left = reader.scrollLeft;
+	if (markRect.left < readerRect.left || markRect.right > readerRect.left + reader.clientWidth) {
+		left += markRect.left - readerRect.left - (reader.clientWidth - markRect.width) / 2;
+	}
+	reader.scrollTo({ top, left, behavior: "smooth" });
 	return true;
 }
 
@@ -413,7 +491,8 @@ async function openPdf(data: Uint8Array, defaultZoom: number, fitToWidthOnOpen: 
 	try {
 		await initializePdfWorker();
 		phase = "loading the document";
-		const loadingTask = pdfjsLib.getDocument({ data, isEvalSupported: false });
+		// fontExtraProperties exposes glyph widths, used to place search highlights precisely.
+		const loadingTask = pdfjsLib.getDocument({ data, isEvalSupported: false, fontExtraProperties: true });
 		pdf = await loadingTask.promise;
 		pageTotal.textContent = `/ ${pdf.numPages}`;
 		for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber++) { makePageElement(pageNumber); }

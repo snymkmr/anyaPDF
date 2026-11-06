@@ -3,6 +3,8 @@
 ## 0.2.2
 
 - Fix find highlights appearing in the wrong place and at the wrong size.
+- Place find highlights using the PDF font's real character widths, so matches in the middle of long lines are highlighted exactly.
+- Keep the toolbar fixed at the top; jumping to a page or match no longer scrolls it out of view.
 - Clear the previous match highlight when moving to a match on another page.
 - Scroll to the match itself, not the top of its page, when moving between matches.
 - Add the full PDF.js license in THIRD-PARTY-NOTICES.md.

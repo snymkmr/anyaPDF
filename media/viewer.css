@@ -8,11 +8,15 @@
 
 * { box-sizing: border-box; }
 
+html { overflow: hidden; }
+
 body {
   margin: 0;
   width: 100vw;
   height: 100vh;
   overflow: hidden;
+  display: flex;
+  flex-direction: column;
   background: var(--vscode-editor-background);
   color: var(--vscode-foreground);
 }
@@ -38,6 +42,7 @@ button[aria-pressed="true"] { color: var(--vscode-button-foreground); background
 button:disabled { opacity: .5; cursor: default; }
 
 .toolbar {
+  flex: none;
   min-height: 42px;
   display: flex;
   align-items: center;
@@ -55,7 +60,9 @@ button:disabled { opacity: .5; cursor: default; }
 #match-count { min-width: 42px; text-align: center; color: var(--vscode-descriptionForeground); }
 .outline-toggle { margin-left: 2px; }
 
-.workspace { height: calc(100vh - 42px); display: flex; min-height: 0; }
+.workspace { flex: 1 1 auto; display: flex; min-height: 0; }
+/* PDF.js appends measuring canvases to <body>; its own stylesheet hides them, so we must too. */
+.hiddenCanvasElement { position: absolute; top: 0; left: 0; width: 0; height: 0; display: none; }
 .outline-pane {
   width: 240px;
   flex: 0 0 240px;
@@ -107,7 +114,6 @@ button:disabled { opacity: .5; cursor: default; }
 
 @media (max-width: 700px) {
   .toolbar { flex-wrap: wrap; height: auto; }
-  .workspace { height: calc(100vh - 76px); }
   .search-controls { margin-left: auto; }
   .outline-pane { width: 190px; flex-basis: 190px; }
 }
