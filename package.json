@@ -2,7 +2,7 @@
   "name": "anyapdf",
   "displayName": "AnyaPDF",
   "description": "Read PDF files in VS Code.",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "publisher": "Sanyam",
   "repository": {
     "type": "git",
