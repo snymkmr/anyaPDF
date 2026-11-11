@@ -11,6 +11,9 @@ function createVscodeStub() {
   const registeredCommands = new Map();
   const customEditors = new Map();
   const configuration = {};
+  const watchers = [];
+  const inputBoxes = [];
+  const inputBoxAnswers = [];
 
   class EventEmitter {
     constructor() { this.listeners = []; }
@@ -21,12 +24,20 @@ function createVscodeStub() {
 
   const uri = (fsPath) => ({ fsPath, path: fsPath, toString: () => fsPath });
 
+  class RelativePattern {
+    constructor(base, pattern) { this.base = base; this.pattern = pattern; }
+  }
+
   return {
     registeredCommands,
     customEditors,
     configuration,
+    watchers,
+    inputBoxes,
+    inputBoxAnswers,
     vscode: {
       EventEmitter,
+      RelativePattern,
       StatusBarAlignment: { Left: 1, Right: 2 },
       Uri: { file: uri, joinPath: (base, ...parts) => uri(path.join(base.fsPath, ...parts)) },
       commands: {
@@ -36,10 +47,18 @@ function createVscodeStub() {
         createStatusBarItem: () => ({ show() {}, hide() {}, dispose() {}, text: '', name: '' }),
         registerCustomEditorProvider(viewType, provider) { customEditors.set(viewType, provider); return { dispose() {} }; },
         showErrorMessage() {},
-        showInputBox: async () => undefined
+        showInputBox: async (options) => { inputBoxes.push(options); return inputBoxAnswers.shift(); }
       },
       workspace: {
         getConfiguration: () => ({ get: (key, fallback) => (key in configuration ? configuration[key] : fallback) }),
+        createFileSystemWatcher(pattern, ignoreCreate, ignoreChange, ignoreDelete) {
+          const watcher = { pattern, ignoreCreate, ignoreChange, ignoreDelete, change: [], create: [], disposed: false,
+            onDidChange(listener) { watcher.change.push(listener); return { dispose() {} }; },
+            onDidCreate(listener) { watcher.create.push(listener); return { dispose() {} }; },
+            dispose() { watcher.disposed = true; } };
+          watchers.push(watcher);
+          return watcher;
+        },
         fs: { readFile: async (target) => new Uint8Array(fs.readFileSync(target.fsPath)) }
       }
     }
@@ -149,4 +168,81 @@ test('third-party notices match the bundled PDF.js version and license', () => {
   assert.match(notices, new RegExp(`Version: ${pdfjs.version.replace(/\./g, '\\.')}\\b`), 'update THIRD-PARTY-NOTICES.md after upgrading pdfjs-dist');
   const licenseText = fs.readFileSync(path.join(root, 'node_modules/pdfjs-dist/LICENSE'), 'utf8').trim();
   assert.ok(notices.includes(licenseText), 'THIRD-PARTY-NOTICES.md must contain the full PDF.js license');
+});
+
+test('recognises complete PDFs by their %%EOF marker', () => {
+  const { extension } = loadExtension();
+  assert.equal(extension.isCompletePdf(Buffer.from('%PDF-1.4\n1 0 obj\n%%EOF\n')), true);
+  assert.equal(extension.isCompletePdf(Buffer.from('%PDF-1.4\n1 0 obj\n<< /Len')), false);
+  assert.equal(extension.isCompletePdf(new Uint8Array()), false);
+});
+
+test('reloads open viewers when the PDF changes on disk, skipping partial and unchanged writes', async (t) => {
+  const { customEditors, watchers } = loadExtension();
+  const provider = customEditors.get('anyapdf.pdfViewer');
+  const directory = fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'anyapdf-watch-'));
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  const file = path.join(directory, 'paper.pdf');
+  fs.writeFileSync(file, '%PDF-1.4 first\n%%EOF\n');
+  const uri = { fsPath: file, path: file, scheme: 'file', toString: () => file };
+
+  const document = await provider.openCustomDocument(uri);
+  assert.equal(watchers.length, 1);
+  assert.equal(watchers[0].pattern.pattern, 'paper.pdf');
+  assert.equal(watchers[0].pattern.base.fsPath, directory);
+  assert.equal(watchers[0].ignoreDelete, true);
+  const { panel, posted, send } = createPanel();
+  await provider.resolveCustomEditor(document, panel);
+  const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+  const reloads = () => posted.filter((message) => message.type === 'reloadPdf');
+
+  fs.writeFileSync(file, '%PDF-1.4 second, still being writ');
+  watchers[0].change.forEach((listener) => listener());
+  await wait(650);
+  assert.equal(reloads().length, 0, 'a partly written PDF is not loaded');
+
+  fs.writeFileSync(file, '%PDF-1.4 second\n%%EOF\n');
+  watchers[0].change.forEach((listener) => listener());
+  watchers[0].change.forEach((listener) => listener());
+  await wait(650);
+  assert.equal(reloads().length, 1, 'rapid change events are combined into one reload');
+  assert.equal(Buffer.from(reloads()[0].data).toString(), '%PDF-1.4 second\n%%EOF\n');
+
+  watchers[0].create.forEach((listener) => listener());
+  await wait(650);
+  assert.equal(reloads().length, 1, 'unchanged content is not reloaded');
+
+  send({ type: 'ready' });
+  const loaded = posted.filter((message) => message.type === 'loadPdf').pop();
+  assert.equal(Buffer.from(loaded.data).toString(), '%PDF-1.4 second\n%%EOF\n', 'a reopened viewer gets the latest bytes');
+
+  document.dispose();
+  assert.equal(watchers[0].disposed, true);
+});
+
+test('asks for a password with a password box and remembers it only for the open document', async () => {
+  const { customEditors, inputBoxes, inputBoxAnswers } = loadExtension();
+  const provider = customEditors.get('anyapdf.pdfViewer');
+  const { panel, posted, send } = createPanel();
+  const document = { uri: { fsPath: '/tmp/locked.pdf' }, bytes: new Uint8Array([37, 80, 68, 70]) };
+  await provider.resolveCustomEditor(document, panel);
+  const wait = () => new Promise((resolve) => setImmediate(resolve));
+
+  inputBoxAnswers.push('wrong', 'secret');
+  send({ type: 'requestPassword', incorrect: false });
+  await wait();
+  send({ type: 'requestPassword', incorrect: true });
+  await wait();
+  assert.equal(inputBoxes.length, 2);
+  assert.equal(inputBoxes[0].password, true);
+  assert.match(inputBoxes[0].prompt, /password-protected/);
+  assert.match(inputBoxes[1].prompt, /Incorrect password/);
+  assert.deepEqual(posted.filter((message) => message.type === 'password').map((message) => message.password), ['wrong', 'secret']);
+
+  send({ type: 'ready' });
+  assert.equal(posted.filter((message) => message.type === 'loadPdf').pop().password, 'secret');
+
+  send({ type: 'requestPassword', incorrect: true });
+  await wait();
+  assert.equal(posted.filter((message) => message.type === 'password').pop().password, undefined, 'cancelling sends no password');
 });

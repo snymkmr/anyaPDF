@@ -1,9 +1,18 @@
 import "./promise-compat";
 import * as pdfjsLib from "pdfjs-dist";
 
-type SearchMatch = { page: number; itemIndex: number; start: number; end: number };
+// A match can span several text items (a phrase split across words or lines), so it is a
+// list of [start, end) ranges, one per text item it touches.
+type SearchPart = { itemIndex: number; start: number; end: number };
+type SearchMatch = { page: number; parts: SearchPart[] };
 type TextItemLike = { str: string };
 type TextContent = Awaited<ReturnType<pdfjsLib.PDFPageProxy["getTextContent"]>>;
+// Where the reader is scrolled to: a page, how far down it the top edge is (a fraction of
+// the page height; negative when the gap above the page is showing), and horizontal scroll.
+type ViewPosition = { page: number; pageOffset: number; scrollLeft: number };
+type SavedState = { zoom?: number; fitWidth?: boolean; page?: number; pageOffset?: number; scrollLeft?: number };
+
+class PasswordCancelledError extends Error {}
 
 const byId = <T extends HTMLElement>(id: string): T => {
 	const element = document.getElementById(id);
@@ -45,8 +54,19 @@ const nearbyPages = new Set<number>();
 const renderTasks = new Map<number, pdfjsLib.RenderTask>();
 const renderTokens = new Map<number, object>();
 const pageGap = 18; // Matches the .pages top padding in viewer.css.
+// Rendered pages further than this from the pages in view are released to free memory;
+// they are drawn again when they come back into view.
+const keepRenderedDistance = 3;
+let observer: IntersectionObserver | undefined;
+let documentGeneration = 0;
+let reloadGeneration = 0;
+let openSettings = { defaultZoom: 100, fitToWidthOnOpen: false };
+let passwordRequest: ((password: string | undefined) => void) | undefined;
+let saveStateTimer = 0;
 
 async function initializePdfWorker(): Promise<void> {
+	// One worker serves every document this viewer opens, including reloads.
+	if (pdfjsLib.GlobalWorkerOptions.workerPort) { return; }
 	if (!workerSrc) { throw new Error("PDF worker resource is unavailable."); }
 	const response = await fetch(workerSrc);
 	if (!response.ok) { throw new Error(`Failed to load PDF worker (${response.status} ${response.statusText}).`); }
@@ -112,6 +132,46 @@ function updateStatus(force = false): void {
 	pageInput.value = String(currentPage);
 	zoomResetButton.textContent = `${Math.round(displayZoom())}%`;
 	sendStatus(force);
+	scheduleSaveState();
+}
+
+function getViewPosition(): ViewPosition | undefined {
+	if (!pdf) { return undefined; }
+	const readerTop = reader.getBoundingClientRect().top;
+	for (const [pageNumber, element] of pageElements) {
+		const rect = element.getBoundingClientRect();
+		if (rect.bottom > readerTop) {
+			const pageOffset = rect.height > 0 ? Math.max(-1, Math.min(1, (readerTop - rect.top) / rect.height)) : 0;
+			return { page: pageNumber, pageOffset, scrollLeft: reader.scrollLeft };
+		}
+	}
+	return { page: currentPage, pageOffset: 0, scrollLeft: reader.scrollLeft };
+}
+
+function restoreViewPosition(position: ViewPosition): void {
+	if (!pdf) { return; }
+	const page = Math.max(1, Math.min(pdf.numPages, Math.floor(position.page) || 1));
+	const element = pageElements.get(page);
+	if (!element) { return; }
+	const rect = element.getBoundingClientRect();
+	const offset = Number.isFinite(position.pageOffset) ? position.pageOffset : 0;
+	reader.scrollTop += rect.top - reader.getBoundingClientRect().top + offset * rect.height;
+	reader.scrollLeft = Number.isFinite(position.scrollLeft) ? position.scrollLeft : 0;
+	currentPage = page;
+}
+
+// Remembers zoom and scroll position so the viewer reopens where it was when VS Code
+// recreates it (after switching tabs, or on window reload).
+function saveState(): void {
+	window.clearTimeout(saveStateTimer);
+	saveStateTimer = 0;
+	if (!pdf) { return; }
+	const state: SavedState = { zoom, fitWidth, ...getViewPosition() };
+	vscode.setState(state);
+}
+
+function scheduleSaveState(): void {
+	if (!saveStateTimer) { saveStateTimer = window.setTimeout(saveState, 150); }
 }
 
 function sendStatus(force = false): void {
@@ -221,7 +281,7 @@ function glyphFractions(item: PdfTextItem, start: number, end: number): [number,
 	return [before / total, (before + inside) / total];
 }
 
-function matchRects(pageNumber: number, match: SearchMatch, span: HTMLElement): DOMRect[] {
+function matchRects(pageNumber: number, match: SearchPart, span: HTMLElement): DOMRect[] {
 	const item = getTextItem(pageNumber, match.itemIndex);
 	const fractions = item ? glyphFractions(item, match.start, match.end) : undefined;
 	if (fractions) {
@@ -244,17 +304,19 @@ function paintHighlights(pageNumber: number): void {
 	for (let matchIndex = 0; matchIndex < matches.length; matchIndex++) {
 		const match = matches[matchIndex];
 		if (match.page !== pageNumber) { continue; }
-		const span = textLayer.querySelector<HTMLElement>(`span[data-text-index="${match.itemIndex}"]`);
-		if (!span) { continue; }
-		for (const rect of matchRects(pageNumber, match, span)) {
-			const mark = document.createElement("div");
-			mark.className = `match-highlight${matchIndex === currentMatch ? " current" : ""}`;
-			mark.style.left = `${rect.left - pageRect.left}px`;
-			mark.style.top = `${rect.top - pageRect.top}px`;
-			mark.style.width = `${rect.width}px`;
-			mark.style.height = `${rect.height}px`;
-			mark.setAttribute("aria-hidden", "true");
-			highlightLayer.append(mark);
+		for (const part of match.parts) {
+			const span = textLayer.querySelector<HTMLElement>(`span[data-text-index="${part.itemIndex}"]`);
+			if (!span) { continue; }
+			for (const rect of matchRects(pageNumber, part, span)) {
+				const mark = document.createElement("div");
+				mark.className = `match-highlight${matchIndex === currentMatch ? " current" : ""}`;
+				mark.style.left = `${rect.left - pageRect.left}px`;
+				mark.style.top = `${rect.top - pageRect.top}px`;
+				mark.style.width = `${rect.width}px`;
+				mark.style.height = `${rect.height}px`;
+				mark.setAttribute("aria-hidden", "true");
+				highlightLayer.append(mark);
+			}
 		}
 	}
 }
@@ -341,6 +403,31 @@ function rerenderNearbyPages(): void {
 	for (const pageNumber of nearbyPages) { void renderPage(pageNumber); }
 }
 
+function releasePage(pageNumber: number): void {
+	renderTasks.get(pageNumber)?.cancel();
+	renderTasks.delete(pageNumber);
+	renderTokens.delete(pageNumber);
+	renderedPages.delete(pageNumber);
+	const element = pageElements.get(pageNumber);
+	if (element) {
+		// Shrinking the canvas frees its pixel memory right away instead of at garbage collection.
+		for (const canvas of element.querySelectorAll("canvas")) { canvas.width = 0; canvas.height = 0; }
+		element.replaceChildren(); // The element keeps its size, so the layout does not move.
+	}
+	const owner = pdf;
+	void owner?.getPage(pageNumber).then((page) => { if (pdf === owner) { page.cleanup(); } }, () => undefined);
+}
+
+// Keeps memory bounded on long documents: only pages near the ones in view stay drawn.
+function releaseDistantPages(): void {
+	if (!nearbyPages.size) { return; }
+	const first = Math.min(...nearbyPages) - keepRenderedDistance;
+	const last = Math.max(...nearbyPages) + keepRenderedDistance;
+	for (const pageNumber of new Set([...renderedPages, ...renderTokens.keys()])) {
+		if (pageNumber < first || pageNumber > last) { releasePage(pageNumber); }
+	}
+}
+
 function scrollToPage(pageNumber: number): void {
 	if (!pdf) { return; }
 	const clamped = Math.max(1, Math.min(pdf.numPages, Math.floor(pageNumber)));
@@ -385,7 +472,62 @@ function moveMatch(direction: number): void {
 	scrollToPage(match.page);
 }
 
-async function search(query: string): Promise<void> {
+// The page's text as one lower-case string, so a phrase is found even when the PDF stores it
+// in several text items (word by word, or across a line break). Runs of whitespace, and line
+// ends, become one space. For each character, `items`/`offsets` record which text item and
+// which character in it the character came from (-1 for a space added at a line end).
+type PageSearchText = { text: string; items: number[]; offsets: number[] };
+
+function buildPageSearchText(content: TextContent): PageSearchText {
+	let text = "";
+	const items: number[] = [];
+	const offsets: number[] = [];
+	const add = (character: string, itemIndex: number, offset: number): void => {
+		text += character;
+		items.push(itemIndex);
+		offsets.push(offset);
+	};
+	let itemIndex = 0;
+	for (const item of content.items) {
+		if (!("str" in item)) { continue; }
+		const source = item.str;
+		// Lower-case the whole item at once (as before) so context-dependent rules, such as the
+		// Greek final sigma, match a lower-cased query; fall back per character if lengths differ.
+		const lower = source.toLocaleLowerCase();
+		const sameLength = lower.length === source.length;
+		for (let offset = 0; offset < source.length; offset++) {
+			if (/\s/.test(source[offset])) {
+				if (text.length && !text.endsWith(" ")) { add(" ", itemIndex, offset); }
+				continue;
+			}
+			const folded = sameLength ? lower[offset] : source[offset].toLocaleLowerCase();
+			for (const unit of folded.split("")) { add(unit, itemIndex, offset); }
+		}
+		if ("hasEOL" in item && item.hasEOL && text.length && !text.endsWith(" ")) { add(" ", -1, -1); }
+		itemIndex++;
+	}
+	return { text, items, offsets };
+}
+
+/** The text-item ranges covered by characters [start, end) of the page's search text. */
+function matchParts(pageText: PageSearchText, start: number, end: number): SearchPart[] {
+	const parts: SearchPart[] = [];
+	for (let index = start; index < end; index++) {
+		const itemIndex = pageText.items[index];
+		if (itemIndex < 0) { continue; }
+		const offset = pageText.offsets[index];
+		const last = parts[parts.length - 1];
+		if (last && last.itemIndex === itemIndex) {
+			last.start = Math.min(last.start, offset);
+			last.end = Math.max(last.end, offset + 1);
+		} else {
+			parts.push({ itemIndex, start: offset, end: offset + 1 });
+		}
+	}
+	return parts;
+}
+
+async function search(query: string, reveal = true): Promise<void> {
 	const generation = ++searchGeneration;
 	matches = [];
 	currentMatch = -1;
@@ -394,26 +536,29 @@ async function search(query: string): Promise<void> {
 	for (const pageNumber of renderedPages) { paintHighlights(pageNumber); }
 	if (!pdf || !query.trim()) { return; }
 	matchCount.textContent = "Searching…";
-	const needle = query.toLocaleLowerCase();
+	const needle = query.replace(/\s+/g, " ").toLocaleLowerCase();
 	try {
 		for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber++) {
 			if (generation !== searchGeneration) { return; }
 			const page = await pdf.getPage(pageNumber);
 			const content = textContents.get(pageNumber) ?? await page.getTextContent();
+			if (generation !== searchGeneration) { return; }
 			textContents.set(pageNumber, content);
-			let itemIndex = 0;
-			for (const item of content.items) {
-				if (!("str" in item)) { continue; }
-				const text = item.str.toLocaleLowerCase();
-				let start = 0;
-				while ((start = text.indexOf(needle, start)) !== -1) {
-					matches.push({ page: pageNumber, itemIndex, start, end: start + needle.length });
-					start += Math.max(1, needle.length);
-				}
-				itemIndex++;
+			const pageText = buildPageSearchText(content);
+			let start = 0;
+			while ((start = pageText.text.indexOf(needle, start)) !== -1) {
+				const parts = matchParts(pageText, start, start + needle.length);
+				if (parts.length) { matches.push({ page: pageNumber, parts }); }
+				start += Math.max(1, needle.length);
 			}
 		}
 		if (generation !== searchGeneration) { return; }
+		if (!reveal) {
+			// After a reload, show the matches without jumping away from where the reader was.
+			matchCount.textContent = matches.length ? `${matches.length} match${matches.length === 1 ? "" : "es"}` : "No matches";
+			for (const pageNumber of renderedPages) { paintHighlights(pageNumber); }
+			return;
+		}
 		matchCount.textContent = matches.length ? `0 of ${matches.length}` : "No matches";
 		if (matches.length) { currentMatch = -1; moveMatch(1); }
 	} catch {
@@ -423,8 +568,10 @@ async function search(query: string): Promise<void> {
 
 async function buildOutline(): Promise<void> {
 	if (!pdf) { return; }
+	const generation = documentGeneration;
 	const outline = await pdf.getOutline();
-	if (!outline?.length) { return; }
+	if (generation !== documentGeneration) { return; } // A reloaded document replaced this one.
+	if (!outline?.length) { outlinePane.hidden = true; return; }
 	outlineToggle.hidden = false;
 	const createItems = (items: typeof outline): HTMLUListElement => {
 		const list = document.createElement("ul");
@@ -486,54 +633,165 @@ function attachControls(): void {
 
 let searchTimer = 0;
 
-async function openPdf(data: Uint8Array, defaultZoom: number, fitToWidthOnOpen: boolean): Promise<void> {
+// Asks the extension for the PDF's password (VS Code shows a password input box).
+function requestPassword(incorrect: boolean): Promise<string | undefined> {
+	passwordRequest?.(undefined);
+	return new Promise((resolve) => {
+		passwordRequest = resolve;
+		vscode.postMessage({ type: "requestPassword", incorrect });
+	});
+}
+
+async function loadDocument(data: Uint8Array, password: string | undefined): Promise<pdfjsLib.PDFDocumentProxy> {
+	// fontExtraProperties exposes glyph widths, used to place search highlights precisely.
+	const loadingTask = pdfjsLib.getDocument({ data, password, isEvalSupported: false, fontExtraProperties: true });
+	let cancelled = false;
+	loadingTask.onPassword = (updatePassword: (password: string) => void, reason: number) => {
+		void requestPassword(reason === pdfjsLib.PasswordResponses.INCORRECT_PASSWORD).then((value) => {
+			if (value === undefined) {
+				cancelled = true;
+				void loadingTask.destroy();
+			} else {
+				updatePassword(value);
+			}
+		});
+	};
+	try {
+		return await loadingTask.promise;
+	} catch (error) {
+		if (cancelled) { throw new PasswordCancelledError("No password was entered."); }
+		throw error;
+	}
+}
+
+// Clears everything that belongs to the current document so another one can be shown.
+function resetViewer(): void {
+	documentGeneration++;
+	searchGeneration++;
+	observer?.disconnect();
+	observer = undefined;
+	for (const task of renderTasks.values()) { task.cancel(); }
+	for (const element of pageElements.values()) {
+		for (const canvas of element.querySelectorAll("canvas")) { canvas.width = 0; canvas.height = 0; }
+	}
+	renderTasks.clear();
+	renderTokens.clear();
+	renderedPages.clear();
+	nearbyPages.clear();
+	pageElements.clear();
+	pageSizes.clear();
+	textContents.clear();
+	textItemsByPage.clear();
+	fontWidths.clear();
+	pagesElement.replaceChildren();
+	outlineList.replaceChildren();
+	outlineToggle.hidden = true;
+	matches = [];
+	currentMatch = -1;
+	pendingMatchReveal = false;
+	matchCount.textContent = "";
+	errorMessage.hidden = true;
+}
+
+async function showDocument(nextPdf: pdfjsLib.PDFDocumentProxy, position?: ViewPosition): Promise<void> {
+	const firstPage = await nextPdf.getPage(1);
+	const firstViewport = firstPage.getViewport({ scale: 1 });
+	const previous = pdf;
+	resetViewer();
+	pdf = nextPdf;
+	pageTotal.textContent = `/ ${pdf.numPages}`;
+	for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber++) { makePageElement(pageNumber); }
+	pageSizes.set(1, { width: firstViewport.width, height: firstViewport.height });
+	// Seed approximate page geometry, then replace it with exact dimensions as pages enter view.
+	layoutPages();
+	if (position) { restoreViewPosition(position); }
+	const currentObserver = new IntersectionObserver((entries) => {
+		for (const entry of entries) {
+			const pageNumber = Number((entry.target as HTMLElement).dataset.page);
+			if (entry.isIntersecting) {
+				nearbyPages.add(pageNumber);
+				void renderPage(pageNumber);
+			} else {
+				nearbyPages.delete(pageNumber);
+			}
+		}
+		releaseDistantPages();
+		updateStatus();
+	}, { root: reader, rootMargin: "250px 0px", threshold: 0 });
+	observer = currentObserver;
+	for (const element of pageElements.values()) { currentObserver.observe(element); }
+	void renderPage(position ? currentPage : 1).finally(() => { void buildOutline(); });
+	updateStatus();
+	if (previous && previous !== nextPdf) { void previous.destroy(); }
+}
+
+async function openPdf(data: Uint8Array, defaultZoom: number, fitToWidthOnOpen: boolean, password?: string): Promise<void> {
 	let phase = "starting the PDF worker";
 	try {
 		await initializePdfWorker();
 		phase = "loading the document";
-		// fontExtraProperties exposes glyph widths, used to place search highlights precisely.
-		const loadingTask = pdfjsLib.getDocument({ data, isEvalSupported: false, fontExtraProperties: true });
-		pdf = await loadingTask.promise;
-		pageTotal.textContent = `/ ${pdf.numPages}`;
-		for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber++) { makePageElement(pageNumber); }
-		phase = "reading the first page";
-		const firstPage = await pdf.getPage(1);
-		const firstViewport = firstPage.getViewport({ scale: 1 });
-		pageSizes.set(1, { width: firstViewport.width, height: firstViewport.height });
-		const settings = vscode.getState() as { zoom?: number; fitWidth?: boolean } | undefined;
+		const loaded = await loadDocument(data, password);
+		const settings = vscode.getState() as SavedState | undefined;
 		zoom = settings?.zoom ?? defaultZoom;
 		fitWidth = settings?.fitWidth ?? fitToWidthOnOpen;
-		// Seed approximate page geometry, then replace it with exact dimensions as pages enter view.
-		layoutPages();
-		const observer = new IntersectionObserver((entries) => {
-			for (const entry of entries) {
-				const pageNumber = Number((entry.target as HTMLElement).dataset.page);
-				if (entry.isIntersecting) {
-					nearbyPages.add(pageNumber);
-					void renderPage(pageNumber);
-				} else {
-					nearbyPages.delete(pageNumber);
-				}
-			}
-			updateStatus();
-	}, { root: reader, rootMargin: "250px 0px", threshold: 0 });
-		for (const element of pageElements.values()) { observer.observe(element); }
-		void renderPage(1).finally(() => { void buildOutline(); });
-		updateStatus();
+		const position = typeof settings?.page === "number"
+			? { page: settings.page, pageOffset: settings.pageOffset ?? 0, scrollLeft: settings.scrollLeft ?? 0 }
+			: undefined;
+		phase = "reading the first page";
+		await showDocument(loaded, position);
 	} catch (error) {
+		if (error instanceof PasswordCancelledError) {
+			showError("This PDF is password-protected. Close and reopen it to enter the password.");
+			return;
+		}
 		console.error(`[AnyaPDF] Failed while ${phase}`, error);
 		showError("Couldn't open this PDF — the file may be corrupt or password-protected.", `${phase}: ${describeError(error)}`);
 	}
 }
 
+// The file changed on disk: show the new version at the same page, zoom and scroll position.
+// If it cannot be opened, the previous version stays on screen.
+async function reloadPdf(data: Uint8Array, password: string | undefined): Promise<void> {
+	if (!pdf) {
+		await openPdf(data, openSettings.defaultZoom, openSettings.fitToWidthOnOpen, password);
+		return;
+	}
+	const generation = ++reloadGeneration;
+	try {
+		const loaded = await loadDocument(data, password);
+		if (generation !== reloadGeneration) { void loaded.destroy(); return; }
+		const query = searchInput.value;
+		await showDocument(loaded, getViewPosition());
+		if (query.trim()) { void search(query, false); }
+	} catch (error) {
+		if (generation !== reloadGeneration) { return; }
+		if (error instanceof PasswordCancelledError) {
+			showError("The updated PDF is password-protected. Close and reopen it to enter the password.");
+			return;
+		}
+		console.error("[AnyaPDF] Failed to reload the changed PDF", error);
+		showError("Couldn't reload this PDF after it changed on disk. The previous version is still shown.", describeError(error));
+	}
+}
+
 window.addEventListener("message", (event: MessageEvent) => {
-	const message = event.data as { type?: string; data?: ArrayBuffer; action?: string; page?: number; defaultZoom?: number; fitToWidthOnOpen?: boolean };
+	const message = event.data as { type?: string; data?: ArrayBuffer; action?: string; page?: number; defaultZoom?: number; fitToWidthOnOpen?: boolean; password?: unknown };
+	const password = typeof message.password === "string" ? message.password : undefined;
 	if (message.type === "loadPdf") {
 		if (!(message.data instanceof ArrayBuffer)) {
 			showError("AnyaPDF couldn't receive this PDF.", "The extension sent data in an unsupported format.");
 			return;
 		}
-		void openPdf(new Uint8Array(message.data), message.defaultZoom ?? 100, message.fitToWidthOnOpen ?? false);
+		openSettings = { defaultZoom: message.defaultZoom ?? 100, fitToWidthOnOpen: message.fitToWidthOnOpen ?? false };
+		void openPdf(new Uint8Array(message.data), openSettings.defaultZoom, openSettings.fitToWidthOnOpen, password);
+	}
+	if (message.type === "reloadPdf" && message.data instanceof ArrayBuffer) {
+		void reloadPdf(new Uint8Array(message.data), password);
+	}
+	if (message.type === "password") {
+		const resolve = passwordRequest;
+		passwordRequest = undefined;
+		resolve?.(password);
 	}
 	if (message.type === "requestStatus") { updateStatus(true); }
 	if (message.type === "action") {
@@ -551,7 +809,7 @@ window.addEventListener("message", (event: MessageEvent) => {
 });
 
 window.addEventListener("beforeunload", () => {
-	vscode.setState({ zoom, fitWidth });
+	saveState();
 	for (const task of renderTasks.values()) { task.cancel(); }
 	if (workerUrl) { URL.revokeObjectURL(workerUrl); }
 });

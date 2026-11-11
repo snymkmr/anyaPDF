@@ -4,11 +4,14 @@ View PDF documents in Visual Studio Code.
 
 ## Features
 
-- Read-only PDF viewer with lazy page rendering
-- Text selection, copy, and document search
+- Read-only PDF viewer with lazy page rendering; pages far from view are released to keep memory low on long documents
+- Text selection, copy, and document search, including phrases that run across lines
 - Page navigation, zoom, and fit to width
 - Document outline navigation when available
 - Status bar shows the current page and zoom
+- Keeps your page, zoom, and scroll position when you switch tabs or reload the window
+- Reloads automatically when the PDF changes on disk (for example, after a LaTeX build), staying on the same page
+- Opens password-protected PDFs: you are asked for the password, which is kept in memory only while the PDF is open
 
 ## Keyboard shortcuts
 
@@ -41,6 +44,6 @@ AnyaPDF is a read-only viewer. It does not edit, annotate, fill, sign, merge, sp
 
 ## Privacy
 
-See the [Privacy Policy](https://sanyam.dev/privacy) for privacy information about my projects.
+See the [Privacy Policy](https://privacy.sanyam.dev) for privacy information about my projects.
 
 License: MIT. AnyaPDF bundles [PDF.js](https://mozilla.github.io/pdf.js/) (Apache License 2.0); see [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).

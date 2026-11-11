@@ -3,16 +3,77 @@ import * as vscode from "vscode";
 
 const viewType = "anyapdf.pdfViewer";
 
+const reloadDelayMs = 500;
+
 class PdfDocument implements vscode.CustomDocument {
 	private readonly disposeEmitter = new vscode.EventEmitter<void>();
 	readonly onDidDispose = this.disposeEmitter.event;
+	private readonly changeEmitter = new vscode.EventEmitter<void>();
+	/** Fires after `bytes` is replaced with a newer, complete version of the file. */
+	readonly onDidChangeBytes = this.changeEmitter.event;
+	/** The password entered for this PDF, kept in memory only while it is open. */
+	password: string | undefined;
+	private watcher: vscode.FileSystemWatcher | undefined;
+	private reloadTimer: ReturnType<typeof setTimeout> | undefined;
 
-	constructor(readonly uri: vscode.Uri, readonly bytes: Uint8Array) {}
+	constructor(readonly uri: vscode.Uri, public bytes: Uint8Array) {}
+
+	// Watches the file so the viewer can follow rebuilds (for example, LaTeX output).
+	watchForChanges(): void {
+		try {
+			const pattern = new vscode.RelativePattern(vscode.Uri.joinPath(this.uri, ".."), path.posix.basename(this.uri.path));
+			this.watcher = vscode.workspace.createFileSystemWatcher(pattern, false, false, true);
+			this.watcher.onDidChange(() => this.scheduleReload());
+			this.watcher.onDidCreate(() => this.scheduleReload());
+		} catch (error) {
+			console.warn("[AnyaPDF] Could not watch the PDF for changes", error);
+		}
+	}
+
+	private scheduleReload(): void {
+		if (this.reloadTimer) { clearTimeout(this.reloadTimer); }
+		// Wait until writes settle; tools often write a PDF in several steps.
+		this.reloadTimer = setTimeout(() => { void this.reload(); }, reloadDelayMs);
+	}
+
+	private async reload(): Promise<void> {
+		this.reloadTimer = undefined;
+		let bytes: Uint8Array;
+		try {
+			bytes = await vscode.workspace.fs.readFile(this.uri);
+		} catch {
+			return; // Removed or still being written; a later change event retries.
+		}
+		// Skip partly written files (a complete PDF ends with %%EOF) and unchanged content.
+		if (!isCompletePdf(bytes) || sameBytes(bytes, this.bytes)) { return; }
+		this.bytes = bytes;
+		this.changeEmitter.fire();
+	}
 
 	dispose(): void {
+		if (this.reloadTimer) { clearTimeout(this.reloadTimer); }
+		this.watcher?.dispose();
+		this.changeEmitter.dispose();
+		this.password = undefined;
 		this.disposeEmitter.fire();
 		this.disposeEmitter.dispose();
 	}
+}
+
+export function isCompletePdf(bytes: Uint8Array): boolean {
+	const tail = Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength).subarray(Math.max(0, bytes.byteLength - 2048));
+	return tail.includes("%%EOF");
+}
+
+function sameBytes(left: Uint8Array, right: Uint8Array): boolean {
+	return Buffer.from(left.buffer, left.byteOffset, left.byteLength).equals(Buffer.from(right.buffer, right.byteOffset, right.byteLength));
+}
+
+// Webview messaging transfers ArrayBuffer reliably; TypedArrays may arrive as plain objects.
+function toArrayBuffer(bytes: Uint8Array): ArrayBuffer {
+	const buffer = new ArrayBuffer(bytes.byteLength);
+	new Uint8Array(buffer).set(bytes);
+	return buffer;
 }
 
 class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider<PdfDocument> {
@@ -45,7 +106,9 @@ class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider<PdfDocume
 	async openCustomDocument(uri: vscode.Uri): Promise<PdfDocument> {
 		try {
 			const bytes = await vscode.workspace.fs.readFile(uri);
-			return new PdfDocument(uri, bytes);
+			const document = new PdfDocument(uri, bytes);
+			document.watchForChanges();
+			return document;
 		} catch (error) {
 			const detail = error instanceof Error ? error.message : String(error);
 			void vscode.window.showErrorMessage(`AnyaPDF could not read this file: ${detail}`);
@@ -65,17 +128,28 @@ class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider<PdfDocume
 		this.panels.add(panel);
 		this.refreshActivePanel(panel);
 
-		const ready = panel.webview.onDidReceiveMessage((message: { type?: string; page?: number; total?: number; zoom?: number }) => {
+		const ready = panel.webview.onDidReceiveMessage((message: { type?: string; page?: number; total?: number; zoom?: number; incorrect?: boolean }) => {
 			if (message.type === "ready") {
 				const configuration = vscode.workspace.getConfiguration("anyapdf");
-				// Webview messaging transfers ArrayBuffer reliably; TypedArrays may arrive as plain objects.
-				const pdfData = new ArrayBuffer(document.bytes.byteLength);
-				new Uint8Array(pdfData).set(document.bytes);
 				void panel.webview.postMessage({
 					type: "loadPdf",
-					data: pdfData,
+					data: toArrayBuffer(document.bytes),
 					defaultZoom: configuration.get<number>("defaultZoom", 100),
-					fitToWidthOnOpen: configuration.get<boolean>("fitToWidthOnOpen", true)
+					fitToWidthOnOpen: configuration.get<boolean>("fitToWidthOnOpen", true),
+					password: document.password
+				});
+			} else if (message.type === "requestPassword") {
+				void vscode.window.showInputBox({
+					title: `AnyaPDF: ${path.basename(document.uri.fsPath)}`,
+					prompt: message.incorrect
+						? "Incorrect password. Enter the password to open this PDF."
+						: "This PDF is password-protected. Enter its password to open it.",
+					password: true,
+					ignoreFocusOut: true
+				}).then((password) => {
+					// Kept in memory so switching tabs or reloading does not ask again; never saved.
+					document.password = password;
+					void panel.webview.postMessage({ type: "password", password });
 				});
 			} else if (message.type === "requestStatus") {
 				void panel.webview.postMessage({ type: "requestStatus" });
@@ -88,6 +162,13 @@ class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider<PdfDocume
 			}
 		});
 		const viewState = panel.onDidChangeViewState(() => this.refreshActivePanel(panel));
+		// When the file changes on disk, the viewer swaps in the new version in place. A hidden
+		// viewer simply loads the new bytes when it is shown again.
+		const changed = typeof document.onDidChangeBytes === "function"
+			? document.onDidChangeBytes(() => {
+				void panel.webview.postMessage({ type: "reloadPdf", data: toArrayBuffer(document.bytes), password: document.password });
+			})
+			: undefined;
 		const closed = panel.onDidDispose(() => {
 			this.panels.delete(panel);
 			if (this.activePanel === panel) {
@@ -96,6 +177,7 @@ class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider<PdfDocume
 			}
 			ready.dispose();
 			viewState.dispose();
+			changed?.dispose();
 		});
 		panel.onDidDispose(() => closed.dispose());
 	}
