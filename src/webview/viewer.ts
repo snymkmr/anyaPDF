@@ -642,9 +642,10 @@ function requestPassword(incorrect: boolean): Promise<string | undefined> {
 	});
 }
 
-async function loadDocument(data: Uint8Array, password: string | undefined): Promise<pdfjsLib.PDFDocumentProxy> {
+async function loadDocument(data: Uint8Array): Promise<pdfjsLib.PDFDocumentProxy> {
 	// fontExtraProperties exposes glyph widths, used to place search highlights precisely.
-	const loadingTask = pdfjsLib.getDocument({ data, password, isEvalSupported: false, fontExtraProperties: true });
+	// No password is passed or kept: PDF.js asks through onPassword each time it needs one.
+	const loadingTask = pdfjsLib.getDocument({ data, isEvalSupported: false, fontExtraProperties: true });
 	let cancelled = false;
 	loadingTask.onPassword = (updatePassword: (password: string) => void, reason: number) => {
 		void requestPassword(reason === pdfjsLib.PasswordResponses.INCORRECT_PASSWORD).then((value) => {
@@ -725,12 +726,12 @@ async function showDocument(nextPdf: pdfjsLib.PDFDocumentProxy, position?: ViewP
 	if (previous && previous !== nextPdf) { void previous.destroy(); }
 }
 
-async function openPdf(data: Uint8Array, defaultZoom: number, fitToWidthOnOpen: boolean, password?: string): Promise<void> {
+async function openPdf(data: Uint8Array, defaultZoom: number, fitToWidthOnOpen: boolean): Promise<void> {
 	let phase = "starting the PDF worker";
 	try {
 		await initializePdfWorker();
 		phase = "loading the document";
-		const loaded = await loadDocument(data, password);
+		const loaded = await loadDocument(data);
 		const settings = vscode.getState() as SavedState | undefined;
 		zoom = settings?.zoom ?? defaultZoom;
 		fitWidth = settings?.fitWidth ?? fitToWidthOnOpen;
@@ -751,14 +752,14 @@ async function openPdf(data: Uint8Array, defaultZoom: number, fitToWidthOnOpen: 
 
 // The file changed on disk: show the new version at the same page, zoom and scroll position.
 // If it cannot be opened, the previous version stays on screen.
-async function reloadPdf(data: Uint8Array, password: string | undefined): Promise<void> {
+async function reloadPdf(data: Uint8Array): Promise<void> {
 	if (!pdf) {
-		await openPdf(data, openSettings.defaultZoom, openSettings.fitToWidthOnOpen, password);
+		await openPdf(data, openSettings.defaultZoom, openSettings.fitToWidthOnOpen);
 		return;
 	}
 	const generation = ++reloadGeneration;
 	try {
-		const loaded = await loadDocument(data, password);
+		const loaded = await loadDocument(data);
 		if (generation !== reloadGeneration) { void loaded.destroy(); return; }
 		const query = searchInput.value;
 		await showDocument(loaded, getViewPosition());
@@ -776,22 +777,21 @@ async function reloadPdf(data: Uint8Array, password: string | undefined): Promis
 
 window.addEventListener("message", (event: MessageEvent) => {
 	const message = event.data as { type?: string; data?: ArrayBuffer; action?: string; page?: number; defaultZoom?: number; fitToWidthOnOpen?: boolean; password?: unknown };
-	const password = typeof message.password === "string" ? message.password : undefined;
 	if (message.type === "loadPdf") {
 		if (!(message.data instanceof ArrayBuffer)) {
 			showError("AnyaPDF couldn't receive this PDF.", "The extension sent data in an unsupported format.");
 			return;
 		}
 		openSettings = { defaultZoom: message.defaultZoom ?? 100, fitToWidthOnOpen: message.fitToWidthOnOpen ?? false };
-		void openPdf(new Uint8Array(message.data), openSettings.defaultZoom, openSettings.fitToWidthOnOpen, password);
+		void openPdf(new Uint8Array(message.data), openSettings.defaultZoom, openSettings.fitToWidthOnOpen);
 	}
 	if (message.type === "reloadPdf" && message.data instanceof ArrayBuffer) {
-		void reloadPdf(new Uint8Array(message.data), password);
+		void reloadPdf(new Uint8Array(message.data));
 	}
 	if (message.type === "password") {
 		const resolve = passwordRequest;
 		passwordRequest = undefined;
-		resolve?.(password);
+		resolve?.(typeof message.password === "string" ? message.password : undefined);
 	}
 	if (message.type === "requestStatus") { updateStatus(true); }
 	if (message.type === "action") {

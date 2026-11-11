@@ -220,7 +220,7 @@ test('reloads open viewers when the PDF changes on disk, skipping partial and un
   assert.equal(watchers[0].disposed, true);
 });
 
-test('asks for a password with a password box and remembers it only for the open document', async () => {
+test('asks for a password with a password box and never keeps it', async () => {
   const { customEditors, inputBoxes, inputBoxAnswers } = loadExtension();
   const provider = customEditors.get('anyapdf.pdfViewer');
   const { panel, posted, send } = createPanel();
@@ -239,8 +239,10 @@ test('asks for a password with a password box and remembers it only for the open
   assert.match(inputBoxes[1].prompt, /Incorrect password/);
   assert.deepEqual(posted.filter((message) => message.type === 'password').map((message) => message.password), ['wrong', 'secret']);
 
+  // A recreated viewer (tab switch, window reload) gets no password and has to ask again.
   send({ type: 'ready' });
-  assert.equal(posted.filter((message) => message.type === 'loadPdf').pop().password, 'secret');
+  assert.equal('password' in posted.filter((message) => message.type === 'loadPdf').pop(), false);
+  assert.equal(JSON.stringify(document).includes('secret'), false, 'the document does not hold the password');
 
   send({ type: 'requestPassword', incorrect: true });
   await wait();

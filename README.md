@@ -11,7 +11,7 @@ View PDF documents in Visual Studio Code.
 - Status bar shows the current page and zoom
 - Keeps your page, zoom, and scroll position when you switch tabs or reload the window
 - Reloads automatically when the PDF changes on disk (for example, after a LaTeX build), staying on the same page
-- Opens password-protected PDFs: you are asked for the password, which is kept in memory only while the PDF is open
+- Opens password-protected PDFs: the password is used only to open the file and is never kept, so you are asked again when you return to the tab or the file changes on disk
 
 ## Keyboard shortcuts
 

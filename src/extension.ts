@@ -11,8 +11,6 @@ class PdfDocument implements vscode.CustomDocument {
 	private readonly changeEmitter = new vscode.EventEmitter<void>();
 	/** Fires after `bytes` is replaced with a newer, complete version of the file. */
 	readonly onDidChangeBytes = this.changeEmitter.event;
-	/** The password entered for this PDF, kept in memory only while it is open. */
-	password: string | undefined;
 	private watcher: vscode.FileSystemWatcher | undefined;
 	private reloadTimer: ReturnType<typeof setTimeout> | undefined;
 
@@ -54,7 +52,6 @@ class PdfDocument implements vscode.CustomDocument {
 		if (this.reloadTimer) { clearTimeout(this.reloadTimer); }
 		this.watcher?.dispose();
 		this.changeEmitter.dispose();
-		this.password = undefined;
 		this.disposeEmitter.fire();
 		this.disposeEmitter.dispose();
 	}
@@ -135,8 +132,7 @@ class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider<PdfDocume
 					type: "loadPdf",
 					data: toArrayBuffer(document.bytes),
 					defaultZoom: configuration.get<number>("defaultZoom", 100),
-					fitToWidthOnOpen: configuration.get<boolean>("fitToWidthOnOpen", true),
-					password: document.password
+					fitToWidthOnOpen: configuration.get<boolean>("fitToWidthOnOpen", true)
 				});
 			} else if (message.type === "requestPassword") {
 				void vscode.window.showInputBox({
@@ -147,8 +143,7 @@ class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider<PdfDocume
 					password: true,
 					ignoreFocusOut: true
 				}).then((password) => {
-					// Kept in memory so switching tabs or reloading does not ask again; never saved.
-					document.password = password;
+					// Handed straight to the viewer to open the PDF; never kept, so reopening asks again.
 					void panel.webview.postMessage({ type: "password", password });
 				});
 			} else if (message.type === "requestStatus") {
@@ -166,7 +161,7 @@ class PdfEditorProvider implements vscode.CustomReadonlyEditorProvider<PdfDocume
 		// viewer simply loads the new bytes when it is shown again.
 		const changed = typeof document.onDidChangeBytes === "function"
 			? document.onDidChangeBytes(() => {
-				void panel.webview.postMessage({ type: "reloadPdf", data: toArrayBuffer(document.bytes), password: document.password });
+				void panel.webview.postMessage({ type: "reloadPdf", data: toArrayBuffer(document.bytes) });
 			})
 			: undefined;
 		const closed = panel.onDidDispose(() => {
